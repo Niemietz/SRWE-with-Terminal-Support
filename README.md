@@ -62,5 +62,16 @@ _Recent profiles_, so you can quickly pick a profile from that list instead of t
 you can choose any of [the profiles in the SRWE repository](https://github.com/dtgDTGdtg/SRWE/tree/master/Profiles), and load these with
 the _Load Profile_ button after you've downloaded them and stored them in a folder. Download the profiles from the 
 [Releases](https://github.com/dtgDTGdtg/SRWE/releases) tab on GitHub in the `SRWE-Example-Profiles.zip` file. They're just examples: if you want to have different
-resolutions, just load one of them, alter the resolution and save it under a different name. 
+resolutions, just load one of them, alter the resolution and save it under a different name.
 
+## Terminal Commands
+To apply a window configuration profile on a process directly through the Windows terminal just run the app from it adding the arguments
+
+```batch
+SRWE.exe -e [PROCESS_NAME] -p [PROFILE_XML_FILENAME]
+```
+or
+```batch
+SRWE.exe -exec [PROCESS_NAME] -profile [PROFILE_XML_FILENAME]
+```
+It is important to include both of the arguments, otherwise it won't set the changes on the window. Not only that, but the process name should be the full process name

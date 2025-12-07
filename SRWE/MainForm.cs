@@ -10,6 +10,7 @@ using System.IO;
 using System.Xml;
 using System.Xml.XPath;
 using System.Linq;
+using System.Security.Principal;
 
 namespace SRWE
 {
@@ -28,18 +29,22 @@ namespace SRWE
 			FixMultipleActivatedCalls = 0x40
 		}
 
+		private string m_selectedProcessName;
+		private string m_selectedProfileName;
 		private Process m_selectedProcess;
 		private States m_states;
 		private DataTable m_dtWS;
 		private DataTable m_dtWS_EX;
 		private bool _windowSizeSpecificationManuallyChanged = false;
 
-		public MainForm()
+		public MainForm(string processName, string profileName)
 		{
 			InitializeComponent();
 			this.MinimumSize = this.Size;
 
 			m_states = States.None;
+			m_selectedProcessName = processName;
+			m_selectedProfileName = profileName;
 
 			OFD_PROFILE.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
 			SFD_PROFILE.InitialDirectory = OFD_PROFILE.InitialDirectory;
@@ -65,7 +70,15 @@ namespace SRWE
 			ReflectSettingsInUI();
 			UpdateCaption();
 			RefreshRecentProfilesMenu();
-			AutoAttachToLastProcess();
+
+			if (m_selectedProcessName != null && m_selectedProfileName != null)
+			{
+				ApplyChangesBasedOnArguments();
+			}
+			else
+			{
+				AutoAttachToLastProcess();
+			}
 		}
 
 		private void AutoAttachToLastProcess()
@@ -90,6 +103,35 @@ namespace SRWE
 				{
 					// process is active. Attach to it!
 					AttachToProcess(activeProcess);
+					break;
+				}
+			}
+		}
+
+		private void ApplyChangesBasedOnArguments()
+		{
+			Debug.WriteLine("Applying changes based on Power Shell or Command Prompt arguments...");
+			foreach(var process in Process.GetProcesses())
+			{
+				if (!process.ProcessName.ToLower().Equals(m_selectedProcessName.ToLower())) continue;
+
+				// process is active. Attach to it!
+				Debug.WriteLine($"Process {m_selectedProcessName} is active. Attaching to it...");
+				bool processAttached = AttachToProcess(process);
+
+				if (processAttached)
+				{
+					XmlDocument xmlDoc = new XmlDocument();
+					xmlDoc.Load(m_selectedProfileName);
+					XmlElement xmlProfile = (XmlElement)xmlDoc.SelectSingleNode("SRWE/Profile");
+
+					AddWindowsToProfile(xmlProfile, TV_WINDOW_TREE.Nodes);
+
+					RefreshRecentProfilesMenu();
+
+					Debug.WriteLine($"Updating window size and position for process {m_selectedProcessName} based on {m_selectedProfileName}...");
+					LoadProfile(m_selectedProfileName);
+
 					break;
 				}
 			}
@@ -146,12 +188,14 @@ namespace SRWE
 			}
 		}
 
-		private void AttachToProcess(Process toAttachTo)
+		private bool AttachToProcess(Process toAttachTo)
 		{
 			m_selectedProcess = toAttachTo;
 			UpdateCaption();
-			UpdateWindowTree();
+			bool result = UpdateWindowTree();
 			SRWE_Settings.AddRecentProcess(m_selectedProcess.ProcessName);
+
+			return result;
 		}
 
 		private void TSI_REFRESH_Click(object sender, EventArgs e)
@@ -163,7 +207,12 @@ namespace SRWE
 		{
 			if (OFD_PROFILE.ShowDialog(this) != System.Windows.Forms.DialogResult.OK) return;
 
-			XPathDocument xpDoc = new XPathDocument(OFD_PROFILE.FileName);
+			LoadProfile(OFD_PROFILE.FileName);
+		}
+
+		private void LoadProfile(string profileFileName)
+		{
+			XPathDocument xpDoc = new XPathDocument(profileFileName);
 			XPathNavigator navProfile = xpDoc.CreateNavigator().SelectSingleNode("SRWE/Profile");
 			XPathNodeIterator iterator = navProfile.Select("Window");
 
@@ -729,21 +778,31 @@ namespace SRWE
 			if (!EDT_WSEX_HEX.Focused) EDT_WSEX_HEX.Text = win.ExStyle.ToString("X8");
 		}
 
-		private void UpdateWindowTree()
+		private bool UpdateWindowTree()
 		{
 			TV_WINDOW_TREE.Nodes.Clear();
 			ClearWindowInfo();
 
-			if (m_selectedProcess != null && IsProcessRunning(m_selectedProcess))
+			if (m_selectedProcess == null) return false;
+
+			bool isProcessRunning = IsProcessRunning(m_selectedProcess);
+
+			if (!isProcessRunning && !IsUserAdministrator())
 			{
-				List<Window> wndList = Window.GetProcessWindows(m_selectedProcess);
-				CreateTreeElements(TV_WINDOW_TREE.Nodes, wndList);
-				TV_WINDOW_TREE.Focus();
-				if(TV_WINDOW_TREE.Nodes.Count > 0)
-				{
-					TV_WINDOW_TREE.SelectedNode = TV_WINDOW_TREE.Nodes[0];
-				}
+				Console.WriteLine($"\nCouldn't update window tree of {m_selectedProcess.ProcessName}. Try running the application as administrator");
 			}
+
+			if (!isProcessRunning) return false;
+
+			List<Window> wndList = Window.GetProcessWindows(m_selectedProcess);
+			CreateTreeElements(TV_WINDOW_TREE.Nodes, wndList);
+			TV_WINDOW_TREE.Focus();
+			if(TV_WINDOW_TREE.Nodes.Count > 0)
+			{
+				TV_WINDOW_TREE.SelectedNode = TV_WINDOW_TREE.Nodes[0];
+			}
+
+			return true;
 		}
 
 		private void ClearWindowInfo()
@@ -973,5 +1032,11 @@ namespace SRWE
 			UpdateWindowFromMegapixels();
 		}
 
+		static bool IsUserAdministrator()
+		{
+			WindowsIdentity identity = WindowsIdentity.GetCurrent();
+			WindowsPrincipal principal = new WindowsPrincipal(identity);
+			return principal.IsInRole(WindowsBuiltInRole.Administrator);
+		}
     }
 }
